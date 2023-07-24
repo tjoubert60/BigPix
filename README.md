@@ -8,3 +8,12 @@ control is achieved by an on-board ESP computer, which also opens a WiFi acces p
 allowing the spectators to choose the actual image displayed.
 
 Details about BigPix --> visit https://jivaro-models.org/bigpix/page_bigpix.html
+
+# MegaPix
+MegaPix embedded software
+
+MegaPix is an enhancement of BigPix, it displays 512 pixels and images have a unique MPX format which
+may contain animations like a GIF file. MegaPix is controlled through a Web page and MPX binary files
+can be uploaded to the sky with UDP.
+
+
