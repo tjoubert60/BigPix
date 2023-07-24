@@ -16,4 +16,8 @@ MegaPix is an enhancement of BigPix, it displays 512 pixels and images have a un
 may contain animations like a GIF file. MegaPix is controlled through a Web page and MPX binary files
 can be uploaded to the sky with UDP.
 
+MegaPix18.cpp is a BMP to MPX converter provided as a sample for further development. It has been 
+built on Windows11 using VS2022. The project requires the EasyBMP source library.
+https://easybmp.sourceforge.net/
+
 
