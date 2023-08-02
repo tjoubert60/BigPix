@@ -273,7 +273,7 @@ int main(int argc, char** argv)
     ///////////////// write the images maps in output file ///////////////////
     printf("do the RLE part\n");
     fileindex = 0;                    // Re-init to process 
-    totalBytes = 0;
+
     while (fileindex < atoi(argv[2]))
     {
       if (baseTempo == 0)
