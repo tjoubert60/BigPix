@@ -32,6 +32,7 @@
    2023-07-21  v1.4  T. JOUBERT  Animations tempo
    2023-07-21  v1.5  T. JOUBERT  UDP animation
    2023-07-24  v1.6  T. JOUBERT  Overcome UDP MTU
+   2023-08-04  v1.7  T. JOUBERT  Updated images
    ================================================================
 
     This code follows the general structure of the Arduino code:
@@ -135,7 +136,7 @@
  
 */
 
-#define Version   "MegaPix-v1.6 (c)TJO 2023"
+#define Version   "MegaPix-v1.7 (c)TJO 2023"
 
 #include <WiFi.h>            // comment for ESP8266
 //#include <ESP8266WiFi.h>   // uncomment for ESP8266
@@ -397,7 +398,7 @@ void loop()
     break;
 
   case 6:                           // Perle
-    DisplayMPX(perle);
+    AnimateMPX(perle);
     break;
 
   case 7:                           // UDP guest
@@ -689,4 +690,3 @@ void dumpMem(char* buffer, int nbytes)
   }
   Serial.println();
 }
-
