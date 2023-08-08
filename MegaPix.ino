@@ -24,14 +24,14 @@
 /*
    MegaPix ESP32 firmware, listen HTTP request or UDP packet & draw pixels
 
-   2023-06-06  v0.1  	T. JOUBERT  Donald, 16 color palette
-   2023-06-25  v1.0  	T. JOUBERT  Donald & friends 225 color palette
-   2023-07-04  v1.1  	T. JOUBERT  ESP32 LED_PIN = 16
-   2023-07-04  v1.2  	T. JOUBERT  UDP server
-   2023-07-15  v1.3  	T. JOUBERT  Animated images
-   2023-07-21  v1.4  	T. JOUBERT  Animations tempo
-   2023-07-21  v1.5  	T. JOUBERT  UDP animation
-   2023-07-24  v1.6  	T. JOUBERT  Overcome UDP MTU
+   2023-06-06  v0.1     T. JOUBERT  Donald, 16 color palette
+   2023-06-25  v1.0     T. JOUBERT  Donald & friends 225 color palette
+   2023-07-04  v1.1     T. JOUBERT  ESP32 LED_PIN = 16
+   2023-07-04  v1.2     T. JOUBERT  UDP server
+   2023-07-15  v1.3     T. JOUBERT  Animated images
+   2023-07-21  v1.4     T. JOUBERT  Animations tempo
+   2023-07-21  v1.5     T. JOUBERT  UDP animation
+   2023-07-24  v1.6     T. JOUBERT  Overcome UDP MTU
    2023-08-04  v1.6dev  V. DECAUX   Fire animation
    ================================================================
 
@@ -58,6 +58,7 @@
       5 - TJO
       6 - Vermeer
       7 - UDP motif
+      8 - Fire animation
       
     All of the above patterns are in MPX format:
     The MPX Header:
@@ -136,7 +137,7 @@
  
 */
 
-#define Version   "MegaPix-v1.6dev (c)TJO 2023"
+#define Version   "MegaPix-v1.6 (c)TJO 2023"
 
 #include <WiFi.h>            // comment for ESP8266
 //#include <ESP8266WiFi.h>   // uncomment for ESP8266
@@ -144,11 +145,9 @@
 #include <AsyncUDP.h>
 #include "motifsMPX.h"
 
+////////////////////// MEGAPIX CONFIGURATION //////////////////////////
 
-
-
-
-#define LED_PIN       16 		//15 for EBMC_board
+#define LED_PIN       16    //15 for EBMC_board
 #define NUM_LEDS      512
 #define INITSEQUENCE  0
 #define MAX_INTENSITY 3
@@ -164,20 +163,50 @@ WiFiServer server(80);  // HTTP server
 AsyncUDP udp;           // UDP receiver
 CRGB leds[NUM_LEDS];    // LED matrix
 
+//
+// MPX Display structures
+//
+char udpmotif[2300];    // UDP receiver structure
+unsigned char palCol[680]; // current palette, saves stack
+
+int sequence  = 0;      // current sequence
+int randomSeq = 0;      // random mode ON/OFF
+int intensity = 1;      // LED level
+int animLine  = 0;      // first line to animate
+int cR, cG, cB;         // current color for line & text
+int stepMotif = 1;      // animation step number
+int imgdone   = 0;      // animation state automaton
+int tempoAnim;          // current image temporisation
+int startSeq;           // sequence start time
+int startUDP = 0;       // sequence start time
+int offsetUDP = 0;      // UDP multi packet because MTU=1470
+int UDPfirstSz = 0;     // first UDP packet size
+int flamesMotion = 0;   // flames tempo displacement
+int flamesSpeed = 20000;// flame growth speed
+int firestep = 1;       // flames motion increment/decrement
+
+//
+//  MPX Prototypes
+//
+void dumpMem(char* buffer, int nbytes);
+void DrawPalette(char*  motif);
+void AnimateMPX(char* motif);
+void DisplayMPX(char* motif);
+void DrawMPX(char*  motif, int animidx);
+void RandomColor();
+void AnimateLine(int line, int dt);
+void ClearPixel(int li, int co);
+void DoPixel(int li, int co, char red, char green, char blue, char intensite);
 
 
-
-
-
-#define DISPLAY_TEST  /* define to show test patterns at startup */
+////////////////////// FLAMES CONFIGURATION //////////////////////////
 
 /* MATRIX CONFIGURATION -- PLEASE SEE THE README (GITHUB LINK ABOVE) */
-
 #define MAT_TYPE NEOPIXEL   /* Matrix LED type; see FastLED docs for others */
 #define MAT_W   32          /* Size (columns) of entire matrix */
 #define MAT_H   16          /* and rows */
 //#if defined(ESP32) || defined(ESP8266)
-//#define MAT_PIN 13           /* Data for matrix on D3 on ESP8266 */
+//#define MAT_PIN 13          /* Data for matrix on D3 on ESP8266 */
 //#else
 //#define MAT_PIN 6           /* Data for matrix on pin 6 for Arduino/other */
 //#endif
@@ -204,31 +233,26 @@ CRGB leds[NUM_LEDS];    // LED matrix
 #undef PANEL_ZIGZAG
 #endif
 
-/* DEBUG CONFIGURATION */
-
-#undef  SERIAL              /* Serial slows things down; don't leave it on. */
-
-/* SECONDARY CONFIGURATION */
-
-
 /* Display size; can be smaller than matrix size, and if so, you can move the origin.
  * This allows you to have a small fire display on a large matrix sharing the display
  * with other stuff. See README at Github. */
 const uint16_t rows = MAT_H * PANELS_H;
 const uint16_t cols = MAT_W * PANELS_W;
-const uint16_t xorg = 0;
-const uint16_t yorg = 0;
+const uint16_t xorg = 0;                // fire base is moving
+//const uint16_t yorg = 0;
+uint16_t yorg = 0;
 
 /* Flare constants */
-const uint8_t flarerows = 2;    /* number of rows (from bottom) allowed to flare */
+const uint8_t flarerows = 1;  //2  /* number of rows (from bottom) allowed to flare */
 const uint8_t maxflare = 8;     /* max number of simultaneous flares */
 const uint8_t flarechance = 50; /* chance (%) of a new flare (if there's room) */
 const uint8_t flaredecay = 14;  /* decay rate of flare radiation; 14 is good */
 
-/* This is the map of colors from coolest (black) to hottest. Want blue flames? Go for it! */
-const uint32_t colors[] = {
+
+/* This is the map of base colors from coolest (black) to hottest. Want blue flames? Go for it! */
+const uint32_t basecolors[] = {
   0x000000,
-  0x100000,
+  0x100000,   // 0x050000,
   0x300000,
   0x600000,
   0x800000,
@@ -239,12 +263,28 @@ const uint32_t colors[] = {
   0xC08000,
   0x807080
 };
+
+uint32_t colors[] = {       // dynamic color map used for drawing a changing fire 
+  0x000000,
+  0x100000,   // 0x050000,
+  0x300000,
+  0x600000,
+  0x800000,
+  0xA00000,
+  0xC02000,
+  0xC04000,
+  0xC06000,
+  0xC08000,
+  0x807080
+};
+
 const uint8_t NCOLORS = (sizeof(colors)/sizeof(colors[0]));
 
 uint8_t pix[rows][cols];
 CRGB matrix[MAT_H * PANELS_H * MAT_W * PANELS_W];
 uint8_t nflare = 0;
 uint32_t flare[maxflare];
+int flamesReduc = 0;
 
 /** pos - convert col/row to pixel position index. This takes into account
  *  the serpentine display, and mirroring the display so that 0,0 is the
@@ -264,6 +304,9 @@ const uint8_t phy_w = MAT_H;
 const uint8_t phy_h = MAT_H;
 const uint8_t phy_w = MAT_W;
 #endif
+
+/** Calculates fire pixels in the whole display 
+*/
 #if defined(MULTIPANEL)
 uint16_t _pos( uint16_t col, uint16_t row ) {
 #else
@@ -313,6 +356,8 @@ uint16_t pos(uint16_t col, uint16_t row) {
 }
 #endif
 
+/** Square root function
+*/
 uint32_t isqrt(uint32_t n) {
   if ( n < 2 ) return n;
   uint32_t smallCandidate = isqrt(n >> 2) << 1;
@@ -337,6 +382,7 @@ void glow( int x, int y, int z ) {
   }
 }
 
+// calculates new flares
 void newflare() {
   if ( nflare < maxflare && random(1,101) <= flarechance ) {
     int x = random(0, cols);
@@ -399,7 +445,13 @@ void make_fire() {
   // Set and draw
   for ( i=0; i<rows; ++i ) {
     for ( j=0; j<cols; ++j ) {
-      leds[pos(j,i)] = CRGB((colors[pix[i][j]] >> 16)&0x0000FF, (colors[pix[i][j]] >> 8)&0x0000FF, colors[pix[i][j]]&0x0000FF);
+      if (yorg < 8 && firestep == 1) {  // keep non-fire pixels from the background image when growing
+        if (pix[i][j] != 0) {
+          leds[pos(j,i)] = CRGB((colors[pix[i][j]] >> 16)&0x0000FF, (colors[pix[i][j]] >> 8)&0x0000FF, colors[pix[i][j]]&0x0000FF);
+        }
+      } else {
+        leds[pos(j,i)] = CRGB((colors[pix[i][j]] >> 16)&0x0000FF, (colors[pix[i][j]] >> 8)&0x0000FF, colors[pix[i][j]]&0x0000FF);
+      }
       //Serial.printf("0x%x: 0x%x, 0x%x, 0x%x\n", colors[pix[i][j]], (colors[pix[i][j]] >> 16)&0x0000FF, (colors[pix[i][j]] >> 8)&0x0000FF, colors[pix[i][j]]&0x0000FF);
       //leds[idpix] = CRGB ( red/2, green/2,  blue/2);
     }
@@ -407,56 +459,9 @@ void make_fire() {
   FastLED.show();
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 //
-// MPX Display structures
+////////////////////////////// SETUP /////////////////////////////////////////
 //
-char udpmotif[2300];    // UDP receiver structure
-unsigned char palCol[680]; // current palette, saves stack
-
-int sequence  = 0;      // current sequence
-int randomSeq = 0;      // random mode ON/OFF
-int intensity = 1;      // LED level
-int animLine  = 0;      // first line to animate
-int cR, cG, cB;         // current color for line & text
-int stepMotif = 1;      // animation step number
-int imgdone   = 0;      // animation state automaton
-int tempoAnim;          // current image temporisation
-int startSeq;           // sequence start time
-int startUDP = 0;       // sequence start time
-int offsetUDP = 0;      // UDP multi packet because MTU=1470
-int UDPfirstSz = 0;     // first UDP packet size
-//
-//  initialize LED, HTTP and UDP
-//
-
-void dumpMem(char* buffer, int nbytes);
-void DrawPalette(char*  motif);
-void AnimateMPX(char* motif);
-void DisplayMPX(char* motif);
-void DrawMPX(char*  motif, int animidx);
-void RandomColor();
-void AnimateLine(int line, int dt);
-void ClearPixel(int li, int co);
-void DoPixel(int li, int co, char red, char green, char blue, char intensite);
-
-
-
 void setup()
 {
   FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, NUM_LEDS); // init LED object
@@ -516,7 +521,7 @@ void setup()
 }
 
 //
-//  Play current animation while listening to HTTP requests
+/////////////////////Play current animation while listening to HTTP requests /////////////
 //
 void loop()
 {
@@ -638,6 +643,14 @@ void loop()
           { sequence = 8;
             requestDone = 1;
             stepMotif = 0;
+            flamesMotion = 0;                       // flames motion counter
+            firestep = 1;                           // flames motion increment
+            yorg = 0;                               // set first row
+            for (int i=0; i < NCOLORS ; i++)        // starts with very low flame colors
+              (i < 5) ? colors[i] = 0x000000
+                      : colors[i] = basecolors[i];
+                      
+              colors[5] = 0x200000;
           }
            
           if (requestDone == 1)     // prepare display
@@ -687,8 +700,28 @@ void loop()
   case 7:                           // UDP guest
     AnimateMPX(udpmotif);
     break;
+    
   case 8:                           // fire
     make_fire();
+    if ( flamesMotion++ % flamesSpeed == 0)
+    {
+      int translate = (yorg < 5)? 5-yorg: 0;  // flames color translation connected to yorg
+      for (int i=0; i < 6 ; i++)              // Set flame colors from basecolors
+      {
+        (i>translate) ? colors[i] = basecolors[i-translate]
+                      : colors[i] = basecolors[0];
+      }
+              
+      if (yorg == 8) {             // fire declines at 8
+        firestep = -1;
+        flamesSpeed = 8000;
+      }
+      
+      yorg += firestep;
+      if (yorg == 0 && firestep == -1) {  // stops at 0
+        firestep = 0;
+      }
+    }
     break;
   }
 }
@@ -977,4 +1010,3 @@ void dumpMem(char* buffer, int nbytes)
   }
   Serial.println();
 }
-
