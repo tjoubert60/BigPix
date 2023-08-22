@@ -24,14 +24,18 @@
 // MegaPix18.cpp 
 //
 // 1. Translates a serie of 24bits BMP into one MPX animation file
-// --> output is a C source or an MPX binary
-// --> Images tempo is given as argument
+// --> arg#1  bmp file prefix (aa for aa1.bmp, aa2.bmp...)
+// --> arg#2  number of bmp files to process
+// --> arg#3  common images tempo (if 0, will ask if no args#5) 
+// --> arg#4  output file is a C source ('C') or an MPX binary ('M')
+// --> [arg#5+] images tempos (arg#3 must be 0, will ask if missing)
 //
 // T. JOUBERT
 // v0.1   03 Jul. 2023     ASCII and binaire
 // v1.1   15 Jul. 2023     Animations
-// v1.2   23 Jul. 2023     Tempo
+// v1.2   23 Jul. 2023     Global tempo
 // v1.3   28 Jul. 2023     Refactoring
+// v1.4   18 Aug. 2023     Tempo values as args
 // 
 
 /*   ----CONTENT OF AN MPX FILE----
@@ -93,7 +97,7 @@
 #include "..\RGBconvert\EasyBMP.h"
 #include<windows.h>
 
-#define VERSION "v1.3  2023-07-28"
+#define VERSION "v1.4  2023-08-18"
 
 //--------------------------------------------------------
 // STRUCTS
@@ -127,6 +131,7 @@ int main(int argc, char** argv)
   RGBdec pixRGB;
   RGBApixel pix;
   unsigned char* mapCol[10];
+  int nbFiles = 0;
   int idmap = 0;
   unsigned char colCour;
   int nbRepet;
@@ -150,15 +155,19 @@ int main(int argc, char** argv)
   unsigned char baseTempo = 30;
   int imgTempo;
 
-  if (argc < 4)
+  if (argc < 5)
   {
     goto syntax;
   }
   try
   {
-    if (argc > 4)                   // argc = 5+ --> out to .c file
+    nbFiles = atoi(argv[2]);        // number of BMP, can't be zero
+    if (nbFiles == 0)
+        goto syntax;
+
+    if (argv[4][0] == 'C')          // argv[4] --> out to .c file else to .mpx
     {
-      asciiOut = true;              // argc = 4  --> out to .mpx file
+      asciiOut = true;
     }
     allColors[nbColors++] = { 0,0,0 };          // Black
     allColors[nbColors++] = { 255, 255, 255 };  // White
@@ -178,14 +187,18 @@ int main(int argc, char** argv)
     }
 
     //////////////// read each BMP to count colors and do the map ////////////////
-    while (fileindex < atoi(argv[2]))   // open each BMP file from args
+    while (fileindex < nbFiles)        // open each BMP file from args
     {
       strcpy(infilename, argv[1]);
       _itoa(fileindex + 1, filenum, 10);
       strcat(infilename, filenum);
       strcat(infilename, ".bmp");
-      printf("reading %s\n", infilename);
       bmp.ReadFromFile(infilename);     // !!must be a 16x32 BMP image
+
+      if (bmp.TellHeight() != 16 || bmp.TellWidth() != 32) {
+          printf("\n!!! %s is not a 16x32 image !!!\n", infilename);
+          return 0;
+      }
 
       mapCol[fileindex] = (unsigned char*)malloc(bmp.TellHeight() * bmp.TellWidth());  // allocate color map
       idmap = 0;      // re-init mapCol index
@@ -222,7 +235,7 @@ int main(int argc, char** argv)
           //printf("%02x, ", idcolPx + 0xEE);
         }
       }
-      printf("---> %d colors\n", nbColors);
+      printf("%s ---> %d colors\n", infilename, nbColors);
       fileindex++;
     } // All BMP have been processed
 
@@ -244,7 +257,7 @@ int main(int argc, char** argv)
     {
       if (asciiOut)
       {
-        fprintf(fp, "%02X, %02X, %02X, ", allColors[i].R, allColors[i].G, allColors[i].B);
+        fprintf(fp, "%3u, %3u, %3u, ", allColors[i].R, allColors[i].G, allColors[i].B);
         //printf("%3u, %3u, %3u\n", allColors[i].R, allColors[i].G, allColors[i].B);
       }
       else
@@ -271,17 +284,20 @@ int main(int argc, char** argv)
     }
 
     ///////////////// write the images maps in output file ///////////////////
-    printf("do the RLE part\n");
-    fileindex = 0;                    // Re-init to process 
+    fileindex = 0;                     // Re-init to process 
 
-    while (fileindex < atoi(argv[2]))
+    while (fileindex < nbFiles)
     {
       if (baseTempo == 0)
       {
-        printf("Tempo for image %d ([1-255] unit=10ms) ? ", fileindex + 1);
-        scanf("%d", &imgTempo);
+          if (argc >= 6 + fileindex)   // get tempo from arguments
+              imgTempo = atoi(argv[5 + fileindex]);
+          else {                        // or ask for it
+              printf("Tempo for image %d ([1-255] unit=10ms) ? ", fileindex + 1);
+              scanf("%d", &imgTempo);
+          }      
       }
-      else
+      else                              // invariant tempo from args
       {
         imgTempo = baseTempo;
       }
@@ -404,7 +420,7 @@ int main(int argc, char** argv)
     else                              // write buffer to binary file
     {
       fwrite(buffer, totalBytes, 1, fp);
-      //printf("totalBytes+1 = %d   idb = %d\n", totalBytes + 1, idb);
+      //printf("totalBytes = %d   idb = %d\n", totalBytes + 1, idb);
     }
     printf("\n+------------------------------------+\n");
     printf("| %4d bytes in %20s |\n", totalBytes, outfilename);
@@ -420,9 +436,12 @@ int main(int argc, char** argv)
 
 syntax:
   printf("Version %s\n\n", VERSION);
-  printf("Syntaxe %s bmp_name_prefix number_of_bmp tempo_or_0 [ascii]\n", argv[0]);
-  printf("    ex: %s aa 3 30\n", argv[0]);
-  printf("    Will export aa1.bmp aa2.bmp aa3.bmp in aa.mpx with tempo 30\n");
-  printf("    ex: %s bb 2 0 a\n", argv[0]);
-  printf("    Will export bb1.bmp bb2.bmp in bb.c asking for tempos\n");
+  printf("Syntaxe %s bmp_name_prefix number_of_bmp tempo_or_0 C_or_M [tempo_values]\n", argv[0]);
+  printf("    ex: %s aa 3 30 M\n", argv[0]);
+  printf("        Will export aa1.bmp aa2.bmp aa3.bmp in aa.mpx with tempo 30\n");
+  printf("    ex: %s bb 2 0 C\n", argv[0]);
+  printf("        Will export bb1.bmp bb2.bmp in bb.c asking for tempos\n");
+  printf("    ex: %s z 2 0 M 10 100\n", argv[0]);
+  printf("        Will export z1.bmp z2.bmp in z.mpx with tempos 10 and 100\n");
+  return 0;
 }
